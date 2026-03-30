@@ -1,0 +1,1099 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>多作業繳交紀錄 v16.2 (完整修復版)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+    
+    <!-- Firebase SDK (相容模式，最穩定) -->
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+    <style>
+        body { font-family: 'Inter', 'Noto Sans TC', sans-serif; background-color: #F0F4F8; }
+        .macaron-pink { background-color: #FFDFD3; }
+        .macaron-yellow { background-color: #FEF8DD; }
+        .macaron-green { background-color: #D4EDDA; }
+        .macaron-blue { background-color: #D1E7FD; }
+        .macaron-purple { background-color: #E2D9F3; }
+        .status-submitted { background-color: #A7F3D0; color: #047857; }
+        .status-not-submitted { background-color: #FECACA; color: #991B1B; }
+        .status-to-be-corrected { background-color: #BFDBFE; color: #1E40AF; }
+        .student-grid-item { transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out; }
+        .student-grid-item:hover { transform: scale(1.05); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .tab-btn { transition: all 0.2s; }
+        .calendar-day { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; border-radius: 9999px; font-size: 0.9rem; position: relative; transition: all 0.2s; }
+        .calendar-day:hover { background-color: #E5E7EB; }
+        .calendar-day.active { background-color: #3B82F6; color: white; font-weight: bold; }
+        .status-dot { width: 6px; height: 6px; border-radius: 50%; margin-top: 2px; }
+        .dot-red { background-color: #EF4444; }
+        .dot-blue { background-color: #3B82F6; }
+        .dot-green { background-color: #10B981; }
+        #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.9); z-index: 100; display: none; justify-content: center; align-items: center; flex-direction: column; }
+        
+        /* Nav Tabs */
+        .nav-tab { border-bottom-width: 4px; border-color: transparent; color: #6B7280; transition: all 0.2s; }
+        .nav-tab:hover { color: #374151; background-color: #F9FAFB; }
+        .nav-tab.active { border-color: #3B82F6; color: #2563EB; background-color: #EFF6FF; }
+        
+        /* Summary Cards */
+        .summary-card { transition: transform 0.2s; }
+        .summary-card:hover { transform: translateY(-2px); }
+        .badge-resolve { transition: all 0.2s; cursor: pointer; position: relative; overflow: hidden; }
+        .badge-resolve:hover::after {
+            content: "點擊過關";
+            position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+            background: rgba(16, 185, 129, 0.9); color: white; font-weight: bold; font-size: 0.85rem;
+            border-radius: inherit; animation: fadeIn 0.2s;
+        }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    </style>
+</head>
+<body class="p-4 sm:p-6 md:p-8">
+
+    <!-- Loading Screen -->
+    <div id="loading-overlay">
+        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mb-4"></div>
+        <p class="text-gray-600 font-bold" id="loading-text">資料同步中...</p>
+    </div>
+
+    <div class="max-w-7xl mx-auto bg-white rounded-2xl shadow-lg p-6 sm:p-8 space-y-6">
+        <!-- 標題與登入區 -->
+        <header class="flex flex-col md:flex-row justify-between items-center relative gap-4">
+            <div class="text-center md:text-left">
+                <h1 class="text-3xl sm:text-4xl font-bold text-gray-700">每日作業繳交紀錄</h1>
+                <p class="text-lg text-gray-500 mt-2 flex items-center gap-2 justify-center md:justify-start">
+                    <span id="app-mode-label">單機模式 (未登入)</span>
+                    <span id="save-indicator" class="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full hidden">已存檔</span>
+                </p>
+            </div>
+            
+            <div class="flex items-center gap-3">
+                <div id="user-info" class="hidden flex-col items-end">
+                    <span id="user-name" class="font-bold text-gray-700 text-sm"></span>
+                    <div class="flex items-center gap-2 mt-1">
+                        <span class="text-xs text-green-600 flex items-center">● 雲端已連線</span>
+                        <button onclick="location.reload()" class="text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-600 px-2 py-0.5 rounded border border-gray-300 font-bold transition">重新整理</button>
+                    </div>
+                </div>
+                <button id="login-btn" class="bg-white border border-gray-300 text-gray-700 hover:bg-gray-50 font-bold py-2 px-4 rounded-lg shadow-sm flex items-center gap-2 transition">
+                    <svg class="w-5 h-5" viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+                    登入 Google 同步
+                </button>
+                <button id="logout-btn" class="text-sm text-gray-500 hover:text-red-500 underline hidden">登出</button>
+            </div>
+        </header>
+
+        <!-- 主導航 Tabs -->
+        <nav class="flex space-x-1 border-b border-gray-200">
+            <button id="nav-daily" class="nav-tab active px-5 py-3 font-bold rounded-t-lg text-lg">📅 每日點名</button>
+            <button id="nav-missing" class="nav-tab px-5 py-3 font-bold rounded-t-lg text-lg">🚨 缺交總表</button>
+            <button id="nav-correction" class="nav-tab px-5 py-3 font-bold rounded-t-lg text-lg">🔧 訂正總表</button>
+        </nav>
+
+        <!-- 視圖 1：每日點名 -->
+        <div id="view-daily" class="space-y-6 block">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <!-- 左側：月曆 + 下載 -->
+                <section class="lg:col-span-1 bg-white border border-gray-200 rounded-xl p-4 shadow-sm space-y-4">
+                    <div>
+                        <div class="flex justify-between items-center mb-4">
+                            <button id="prev-month" class="p-1 hover:bg-gray-100 rounded text-gray-600">◀</button>
+                            <h3 id="calendar-title" class="text-lg font-bold text-gray-700">載入中...</h3>
+                            <button id="next-month" class="p-1 hover:bg-gray-100 rounded text-gray-600">▶</button>
+                        </div>
+                        <div class="grid grid-cols-7 text-center text-xs text-gray-400 mb-2">
+                            <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
+                        </div>
+                        <div id="mini-calendar-grid" class="grid grid-cols-7 gap-1 text-gray-700"></div>
+                        <div class="mt-2 flex justify-center gap-3 text-xs text-gray-500 flex-wrap">
+                            <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-red-500"></span>有未交</div>
+                            <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-blue-500"></span>待訂正</div>
+                            <div class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-green-500"></span>已收齊</div>
+                        </div>
+                    </div>
+                    <hr class="border-gray-100">
+                    <div class="space-y-3">
+                        <input type="date" id="date" class="hidden">
+                        <input type="file" id="csv-upload" accept=".csv" class="hidden">
+                        <div class="pt-1">
+                            <button id="download-csv" class="w-full bg-teal-500 hover:bg-teal-600 text-white text-lg font-bold py-3 px-3 rounded-lg transition shadow-md flex items-center justify-center gap-2">
+                                下載本日總表 (CSV)
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 右側：作業管理 + 統計 + 分組繳交 -->
+                <section class="lg:col-span-2 bg-gray-50 rounded-xl p-4 sm:p-5 flex flex-col gap-4 shadow-inner">
+                    <div class="flex flex-wrap items-center gap-3">
+                        <h3 class="text-xl font-bold text-gray-700 mr-2">本日作業：</h3>
+                        <div id="assignment-tabs" class="flex flex-wrap gap-2"></div>
+                        <button id="add-assignment-btn" class="flex items-center justify-center w-8 h-8 rounded-full bg-green-500 text-white hover:bg-green-600 focus:outline-none shadow-sm transition transform hover:scale-110" title="新增一項作業">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                        </button>
+                    </div>
+                    <div class="flex items-center gap-3 bg-white p-3 rounded-lg shadow-sm border border-gray-200">
+                        <label class="font-medium text-blue-800 whitespace-nowrap">當前作業名稱：</label>
+                        <input type="text" id="current-assignment-name" class="flex-1 border border-blue-100 bg-blue-50 text-gray-800 text-lg rounded-md px-3 py-1 focus:ring-2 focus:ring-blue-400 focus:outline-none transition" placeholder="例如：國語習作">
+                        <button id="delete-assignment-btn" class="text-red-400 hover:text-red-600 hover:bg-red-50 p-2 rounded-md transition" title="刪除此作業">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                        </button>
+                    </div>
+                    
+                    <div class="pt-1">
+                        <div class="flex items-center justify-between mb-2">
+                            <h4 class="text-sm font-bold text-gray-500">目前作業統計：<span id="stats-title" class="text-blue-600 ml-1"></span></h4>
+                        </div>
+                        <div class="grid grid-cols-3 gap-4">
+                            <div class="bg-white p-2 rounded-lg shadow-sm border-l-4 border-red-500 flex flex-col items-center justify-center">
+                                <span class="text-xs text-gray-400">未交</span>
+                                <span id="not-submitted-count" class="text-xl sm:text-2xl font-bold text-red-600 leading-none mt-1">0</span>
+                            </div>
+                            <div class="bg-white p-2 rounded-lg shadow-sm border-l-4 border-blue-400 flex flex-col items-center justify-center">
+                                <span class="text-xs text-gray-400">待訂正</span>
+                                <span id="to-be-corrected-count" class="text-xl sm:text-2xl font-bold text-blue-500 leading-none mt-1">0</span>
+                            </div>
+                            <div class="bg-white p-2 rounded-lg shadow-sm border-l-4 border-green-500 flex flex-col items-center justify-center">
+                                 <span class="text-xs text-gray-400">已繳交</span>
+                                <span id="submitted-count" class="text-xl sm:text-2xl font-bold text-green-600 leading-none mt-1">0</span>
+                            </div>
+                        </div>
+                        <div class="mt-2 space-y-1 text-sm">
+                            <div class="flex gap-2 bg-white px-2 py-1 rounded border border-red-100">
+                                <span class="font-bold text-red-700 shrink-0">未交：</span>
+                                <span id="not-submitted-list" class="text-gray-600 truncate">無</span>
+                            </div>
+                             <div class="flex gap-2 bg-white px-2 py-1 rounded border border-blue-100">
+                                <span class="font-bold text-blue-700 shrink-0">待訂正：</span>
+                                <span id="to-be-corrected-list" class="text-gray-600 truncate">無</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-indigo-50 p-3 rounded-xl shadow-sm border border-indigo-100 mt-auto">
+                        <h3 class="text-indigo-800 font-bold mb-2 flex items-center gap-1 text-sm">
+                            各家一鍵繳交 (小老師專用)
+                        </h3>
+                        <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2" id="group-buttons-container"></div>
+                    </div>
+                </section>
+            </div>
+            
+            <!-- 學生點名格 -->
+            <main class="mt-2">
+                <div class="flex justify-between items-end mb-4 px-1">
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-700">學生列表</h2>
+                        <p class="text-sm text-gray-400">點擊：未交 → 繳交 → 待訂正 → 繳交</p>
+                    </div>
+                    <button id="mark-all-submitted" class="text-sm bg-blue-100 text-blue-700 hover:bg-blue-200 px-4 py-2 rounded-full font-bold transition shadow-sm">
+                        一鍵全班繳交
+                    </button>
+                </div>
+                
+                <div id="student-grid" class="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-8 lg:grid-cols-10 gap-3"></div>
+            </main>
+        </div>
+
+        <!-- 視圖 2：總表 -->
+        <div id="view-summary" class="hidden">
+            <div class="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div>
+                    <h2 id="summary-title" class="text-2xl font-bold text-gray-700">總表載入中...</h2>
+                    <p class="text-sm text-gray-500 mt-1" id="summary-subtitle">點擊座位按鈕即可瞬間標記為「已繳交」！</p>
+                </div>
+                
+                <div class="bg-gray-200 p-1 rounded-lg inline-flex shrink-0">
+                    <button id="view-by-assignment" class="px-4 py-2 rounded-md font-bold text-sm bg-white shadow text-blue-600 transition-all">📝 依作業檢視 (全班)</button>
+                    <button id="view-by-student" class="px-4 py-2 rounded-md font-bold text-sm text-gray-500 hover:text-gray-700 transition-all">🧑‍🎓 依學生檢視 (個人)</button>
+                </div>
+            </div>
+            
+            <div id="summary-grid"></div>
+            
+            <div id="summary-empty" class="hidden flex-col items-center justify-center py-20">
+                <div class="text-7xl mb-4">🎉</div>
+                <h3 class="text-2xl font-bold text-green-600">太棒了！全班過關！</h3>
+                <p class="text-gray-500 mt-2">目前沒有任何相關紀錄。</p>
+            </div>
+        </div>
+
+        <!-- 設定區 -->
+        <details class="group bg-gray-50 rounded-lg mt-8">
+            <summary class="list-none flex flex-wrap items-center cursor-pointer focus:outline-none p-4 font-medium text-gray-600 hover:text-gray-800">
+                <span class="flex-1">⚙️ 學生與分組設定</span>
+                <span class="transform group-open:rotate-180 transition-transform">▼</span>
+            </summary>
+            <div class="p-4 border-t border-gray-200 space-y-6">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="space-y-1"><label class="text-sm text-gray-500">座號起點</label><input type="number" id="startSeat" class="w-full p-2 border rounded"></div>
+                    <div class="space-y-1"><label class="text-sm text-gray-500">座號終點</label><input type="number" id="endSeat" class="w-full p-2 border rounded"></div>
+                    <div class="space-y-1"><label class="text-sm text-gray-500">排除座號</label><input type="text" id="excludeSeats" class="w-full p-2 border rounded"></div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="space-y-1"><label class="text-sm text-gray-500 font-bold">學生姓名列表</label><textarea id="student-names-input" rows="8" class="w-full p-3 border rounded font-mono text-sm leading-relaxed"></textarea></div>
+                    <div class="space-y-1"><label class="text-sm text-gray-500 font-bold">分組設定</label><textarea id="group-settings-input" rows="8" class="w-full p-3 border rounded font-mono text-sm leading-relaxed"></textarea></div>
+                </div>
+            </div>
+        </details>
+    </div>
+
+    <!-- 自訂確認視窗 -->
+    <div id="custom-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden z-50 flex items-center justify-center">
+        <div class="bg-white rounded-lg p-6 w-80 shadow-xl transform transition-all scale-100">
+            <h3 class="text-lg font-bold text-gray-900 mb-2" id="modal-title"></h3>
+            <p class="text-gray-500 mb-4 text-sm" id="modal-desc"></p>
+            <div class="flex justify-end gap-2">
+                <button id="modal-cancel" class="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300 transition text-sm">取消</button>
+                <button id="modal-confirm" class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition text-sm font-bold">確定</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const userFirebaseConfig = {
+            apiKey: "AIzaSyC8ri0BEKk9hSzSZjq760eWHyNwo9Z2vqE",
+            authDomain: "myhomeworktracker-bbcc3.firebaseapp.com",
+            projectId: "myhomeworktracker-bbcc3",
+            storageBucket: "myhomeworktracker-bbcc3.firebasestorage.app",
+            messagingSenderId: "468701070411",
+            appId: "1:468701070411:web:95d9b588c37ed217aef9ce"
+        };
+
+        const PRELOADED_STUDENTS = [
+            { seatNumber: 1, name: '吳畇臻' }, { seatNumber: 2, name: '曾姿涵' }, { seatNumber: 3, name: '簡瑀希' }, { seatNumber: 4, name: '蕭沂楨' },
+            { seatNumber: 5, name: '吳芊葦' }, { seatNumber: 6, name: '呂宥薰' }, { seatNumber: 7, name: '鄭芯妮' }, { seatNumber: 8, name: '李芊樺' },
+            { seatNumber: 9, name: '潘妍萱' }, { seatNumber: 10, name: '蔡媞如' }, { seatNumber: 11, name: '賴薇珊' }, { seatNumber: 12, name: '吉䕳亞' },
+            { seatNumber: 13, name: '王佑妮' }, { seatNumber: 14, name: '劉爰均' }, { seatNumber: 16, name: '李家成' }, { seatNumber: 17, name: '林思諺' },
+            { seatNumber: 18, name: '陳柏瑋' }, { seatNumber: 19, name: '盧芃宇' }, { seatNumber: 20, name: '林梓樑' }, { seatNumber: 21, name: '吳睿承' },
+            { seatNumber: 22, name: '陳炘戊' }, { seatNumber: 23, name: '朱品翰' }, { seatNumber: 24, name: '龔允丞' }, { seatNumber: 25, name: '莊孟蒝' },
+            { seatNumber: 26, name: '陳泳璿' }, { seatNumber: 27, name: '張敬浩' }, { seatNumber: 28, name: '謝祐宸' }, { seatNumber: 29, name: '盧岍霖' }
+        ];
+        const PRELOADED_GROUPS = [
+            { name: '第一家', members: [28, 10, 25, 7, 22] }, { name: '第二家', members: [3, 21, 12, 16, 5] },
+            { name: '第三家', members: [23, 1, 19, 6, 27] }, { name: '第四家', members: [2, 20, 11, 18, 4] },
+            { name: '第五家', members: [26, 9, 24, 14] }, { name: '第六家', members: [13, 29, 8, 17] }
+        ];
+        const LOCAL_STORAGE_KEY_DATA = 'homework_tracker_data';
+        const LOCAL_STORAGE_KEY_CONFIG = 'homework_tracker_config';
+        const statusCycle = ['not-submitted', 'submitted', 'to-be-corrected', 'submitted-done'];
+        const statusMap = { 'submitted': { text: '繳交', className: 'status-submitted' }, 'submitted-done': { text: '繳交', className: 'status-submitted' }, 'to-be-corrected': { text: '待訂正', className: 'status-to-be-corrected' }, 'not-submitted': { text: '未交', className: 'status-not-submitted' } };
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const els = {
+                dateInput: document.getElementById('date'),
+                startSeat: document.getElementById('startSeat'),
+                endSeat: document.getElementById('endSeat'),
+                excludeSeats: document.getElementById('excludeSeats'),
+                studentNamesInput: document.getElementById('student-names-input'),
+                groupSettingsInput: document.getElementById('group-settings-input'),
+                studentGrid: document.getElementById('student-grid'),
+                assignmentTabs: document.getElementById('assignment-tabs'),
+                addAssignmentBtn: document.getElementById('add-assignment-btn'),
+                currentAssignmentName: document.getElementById('current-assignment-name'),
+                deleteAssignmentBtn: document.getElementById('delete-assignment-btn'),
+                markAllBtn: document.getElementById('mark-all-submitted'),
+                downloadBtn: document.getElementById('download-csv'),
+                modal: document.getElementById('custom-modal'),
+                modalTitle: document.getElementById('modal-title'),
+                modalDesc: document.getElementById('modal-desc'),
+                modalConfirm: document.getElementById('modal-confirm'),
+                modalCancel: document.getElementById('modal-cancel'),
+                statsTitle: document.getElementById('stats-title'),
+                notSubmittedCount: document.getElementById('not-submitted-count'),
+                toBeCorrectedCount: document.getElementById('to-be-corrected-count'),
+                submittedCount: document.getElementById('submitted-count'),
+                notSubmittedList: document.getElementById('not-submitted-list'),
+                toBeCorrectedList: document.getElementById('to-be-corrected-list'),
+                calendarTitle: document.getElementById('calendar-title'),
+                miniCalendarGrid: document.getElementById('mini-calendar-grid'),
+                prevMonthBtn: document.getElementById('prev-month'),
+                nextMonthBtn: document.getElementById('next-month'),
+                groupButtonsContainer: document.getElementById('group-buttons-container'),
+                loginBtn: document.getElementById('login-btn'),
+                logoutBtn: document.getElementById('logout-btn'),
+                userInfo: document.getElementById('user-info'),
+                userName: document.getElementById('user-name'),
+                appModeLabel: document.getElementById('app-mode-label'),
+                saveIndicator: document.getElementById('save-indicator'),
+                loadingOverlay: document.getElementById('loading-overlay'),
+                
+                navDaily: document.getElementById('nav-daily'),
+                navMissing: document.getElementById('nav-missing'),
+                navCorrection: document.getElementById('nav-correction'),
+                viewDaily: document.getElementById('view-daily'),
+                viewSummary: document.getElementById('view-summary'),
+                summaryTitle: document.getElementById('summary-title'),
+                summaryGrid: document.getElementById('summary-grid'),
+                summaryEmpty: document.getElementById('summary-empty'),
+                
+                viewByAssignBtn: document.getElementById('view-by-assignment'),
+                viewByStudentBtn: document.getElementById('view-by-student'),
+                csvUpload: document.getElementById('csv-upload')
+            };
+
+            let students = [...PRELOADED_STUDENTS];
+            let studentGroups = [...PRELOADED_GROUPS];
+            let allData = {}; 
+            let currentDate = '';
+            let assignments = [];
+            let activeAssignmentId = '';
+            let calendarDate = new Date();
+            let pendingAction = null;
+            let currentTab = 'daily'; 
+            let currentSummaryStatus = 'not-submitted';
+            let summaryViewMode = 'by-assignment'; 
+            
+            let isCloudMode = false;
+            let currentUser = null;
+            let unsubscribeData = null;
+            let unsubscribeSettings = null;
+            let db = null;
+            let auth = null;
+
+            initDate();
+            loadLocalData(); 
+            loadAssignmentsForDate(currentDate);
+            render(); 
+
+            if (typeof firebase !== 'undefined') {
+                try {
+                    if (!firebase.apps.length) {
+                        firebase.initializeApp(userFirebaseConfig);
+                    }
+                    auth = firebase.auth();
+                    db = firebase.firestore();
+
+                    // 開啟 Firebase 離線支援 (如果斷網也能運作，連網後自動同步)
+                    db.enablePersistence({ synchronizeTabs: true })
+                        .catch(function(err) {
+                            console.warn("Firestore 離線模式啟用失敗: ", err.code);
+                        });
+
+                    auth.onAuthStateChanged((user) => {
+                        if (user) {
+                            currentUser = user;
+                            handleLoginSuccess(user);
+                        } else {
+                            currentUser = null;
+                            handleLogoutSuccess();
+                        }
+                    });
+                } catch (e) {
+                    console.error("Firebase Init Error:", e);
+                }
+            }
+
+            function initDate() {
+                const today = new Date();
+                const offset = today.getTimezoneOffset() * 60000;
+                const localISOTime = (new Date(today - offset)).toISOString().slice(0, 10);
+                els.dateInput.value = localISOTime;
+                currentDate = localISOTime;
+                calendarDate = new Date(today);
+            }
+
+            function setAppMode(mode) {
+                isCloudMode = (mode === 'cloud');
+                if (isCloudMode) {
+                    els.appModeLabel.textContent = "雲端模式";
+                    els.appModeLabel.className = "text-lg font-bold mt-2 flex items-center gap-2 justify-center md:justify-start text-blue-600";
+                } else {
+                    els.appModeLabel.textContent = "單機模式 (未登入)";
+                    els.appModeLabel.className = "text-lg text-gray-500 mt-2 flex items-center gap-2 justify-center md:justify-start";
+                }
+            }
+
+            function showSaveStatus(msg, isError = false) {
+                if (!els.saveIndicator) return;
+                els.saveIndicator.textContent = msg;
+                els.saveIndicator.classList.remove('hidden', 'text-gray-600', 'bg-gray-200', 'text-red-600', 'bg-red-100', 'text-green-600', 'bg-green-100', 'text-blue-600', 'bg-blue-100');
+                
+                if (isError) {
+                    els.saveIndicator.classList.add('text-red-600', 'bg-red-100');
+                } else if (msg.includes("儲存中") || msg.includes("同步中")) {
+                    els.saveIndicator.classList.add('text-blue-600', 'bg-blue-100');
+                } else {
+                    els.saveIndicator.classList.add('text-green-600', 'bg-green-100');
+                }
+                
+                els.saveIndicator.classList.remove('hidden');
+                
+                if (!msg.includes("中...")) {
+                    setTimeout(() => els.saveIndicator.classList.add('hidden'), 2000);
+                }
+            }
+
+            function switchTab(tabName) {
+                currentTab = tabName;
+                els.navDaily.classList.remove('active');
+                els.navMissing.classList.remove('active');
+                els.navCorrection.classList.remove('active');
+                
+                els.viewDaily.classList.add('hidden');
+                els.viewSummary.classList.add('hidden');
+                
+                if (tabName === 'daily') {
+                    els.navDaily.classList.add('active');
+                    els.viewDaily.classList.remove('hidden');
+                    render();
+                } else if (tabName === 'missing') {
+                    els.navMissing.classList.add('active');
+                    els.viewSummary.classList.remove('hidden');
+                    currentSummaryStatus = 'not-submitted';
+                    renderSummary(currentSummaryStatus);
+                } else if (tabName === 'correction') {
+                    els.navCorrection.classList.add('active');
+                    els.viewSummary.classList.remove('hidden');
+                    currentSummaryStatus = 'to-be-corrected';
+                    renderSummary(currentSummaryStatus);
+                }
+            }
+
+            els.navDaily.addEventListener('click', () => switchTab('daily'));
+            els.navMissing.addEventListener('click', () => switchTab('missing'));
+            els.navCorrection.addEventListener('click', () => switchTab('correction'));
+
+            els.viewByAssignBtn.addEventListener('click', () => {
+                summaryViewMode = 'by-assignment';
+                els.viewByAssignBtn.className = 'px-4 py-2 rounded-md font-bold text-sm bg-white shadow text-blue-600 transition-all';
+                els.viewByStudentBtn.className = 'px-4 py-2 rounded-md font-bold text-sm text-gray-500 hover:text-gray-700 transition-all';
+                renderSummary(currentSummaryStatus);
+            });
+
+            els.viewByStudentBtn.addEventListener('click', () => {
+                summaryViewMode = 'by-student';
+                els.viewByStudentBtn.className = 'px-4 py-2 rounded-md font-bold text-sm bg-white shadow text-blue-600 transition-all';
+                els.viewByAssignBtn.className = 'px-4 py-2 rounded-md font-bold text-sm text-gray-500 hover:text-gray-700 transition-all';
+                renderSummary(currentSummaryStatus);
+            });
+
+            function loadLocalData() {
+                const storedData = localStorage.getItem(LOCAL_STORAGE_KEY_DATA);
+                if (storedData) allData = JSON.parse(storedData);
+                else allData = {};
+
+                const storedConfig = localStorage.getItem(LOCAL_STORAGE_KEY_CONFIG);
+                if (storedConfig) {
+                    const config = JSON.parse(storedConfig);
+                    if (config.start) els.startSeat.value = config.start;
+                    if (config.end) els.endSeat.value = config.end;
+                    if (config.exclude) els.excludeSeats.value = config.exclude;
+                    if (config.customNames) students = config.customNames.map(item => ({ seatNumber: item.s, name: item.n }));
+                    if (config.customGroups) studentGroups = config.customGroups;
+                } else {
+                    els.startSeat.value = 1; els.endSeat.value = 29; els.excludeSeats.value = '15';
+                    students = [...PRELOADED_STUDENTS];
+                    studentGroups = [...PRELOADED_GROUPS];
+                }
+            }
+
+            function handleLoginSuccess(user) {
+                setAppMode('cloud');
+                els.loginBtn.classList.add('hidden');
+                els.userInfo.classList.remove('hidden');
+                els.userInfo.classList.add('flex');
+                els.logoutBtn.classList.remove('hidden');
+                els.userName.textContent = user.displayName;
+                els.loadingOverlay.style.display = 'flex';
+
+                const settingsRef = db.collection('users').doc(user.uid).collection('settings').doc('config');
+                unsubscribeSettings = settingsRef.onSnapshot((docSnap) => {
+                    if (docSnap.exists) {
+                        const data = docSnap.data();
+                        if (data.start) els.startSeat.value = data.start;
+                        if (data.end) els.endSeat.value = data.end;
+                        if (data.exclude) els.excludeSeats.value = data.exclude;
+                        if (data.customNames) students = data.customNames.map(item => ({ seatNumber: item.s, name: item.n }));
+                        if (data.customGroups) studentGroups = data.customGroups;
+                        if(currentTab === 'daily') render();
+                        else switchTab(currentTab); 
+                    } else {
+                        saveSettings();
+                    }
+                });
+
+                const recordsRef = db.collection('users').doc(user.uid).collection('daily_records');
+                unsubscribeData = recordsRef.onSnapshot((snapshot) => {
+                    snapshot.docChanges().forEach((change) => {
+                        const date = change.doc.id;
+                        if (change.type === "removed") delete allData[date];
+                        else allData[date] = change.doc.data().assignments || [];
+                    });
+                    loadAssignmentsForDate(currentDate);
+                    
+                    if(currentTab === 'daily') render();
+                    else switchTab(currentTab);
+
+                    els.loadingOverlay.style.display = 'none';
+                });
+            }
+
+            function handleLogoutSuccess() {
+                setAppMode('local');
+                els.loginBtn.classList.remove('hidden');
+                els.userInfo.classList.add('hidden');
+                els.userInfo.classList.remove('flex');
+                els.logoutBtn.classList.add('hidden');
+                if (unsubscribeData) unsubscribeData();
+                if (unsubscribeSettings) unsubscribeSettings();
+                loadLocalData();
+                loadAssignmentsForDate(currentDate);
+                switchTab('daily');
+            }
+
+            function saveData() {
+                saveSpecificDateData(currentDate);
+            }
+
+            function saveSpecificDateData(dateStrToSave) {
+                showSaveStatus("儲存中...");
+                if (isCloudMode && currentUser) {
+                    const docRef = db.collection('users').doc(currentUser.uid).collection('daily_records').doc(dateStrToSave);
+                    // 完全覆寫，允許清除最後一項作業
+                    docRef.set({ assignments: allData[dateStrToSave] || [] })
+                        .then(() => showSaveStatus("已同步至雲端"))
+                        .catch((error) => {
+                            console.error("同步錯誤:", error);
+                            showSaveStatus("同步失敗，請檢查網路", true);
+                        });
+                } else {
+                    localStorage.setItem(LOCAL_STORAGE_KEY_DATA, JSON.stringify(allData));
+                    showSaveStatus("已儲存至本機");
+                }
+            }
+
+            function saveSettings() {
+                const config = {
+                    start: els.startSeat.value,
+                    end: els.endSeat.value,
+                    exclude: els.excludeSeats.value,
+                    customNames: students.map(s => ({ s: s.seatNumber, n: s.name })),
+                    customGroups: studentGroups
+                };
+                if (isCloudMode && currentUser) {
+                    db.collection('users').doc(currentUser.uid).collection('settings').doc('config').set(config, { merge: true })
+                        .catch(e => console.error('設定同步失敗:', e));
+                } else {
+                    localStorage.setItem(LOCAL_STORAGE_KEY_CONFIG, JSON.stringify(config));
+                }
+            }
+
+            function loadAssignmentsForDate(dateStr) {
+                // 如果該日期沒有資料，預設為空陣列，不要強制產生作業
+                if (!allData[dateStr]) {
+                    allData[dateStr] = []; 
+                }
+                assignments = allData[dateStr];
+                if (assignments.length > 0) {
+                    if (!assignments.find(a => a.id === activeAssignmentId)) {
+                        activeAssignmentId = assignments[0].id;
+                    }
+                } else {
+                    activeAssignmentId = ''; // 沒有作業時清空 activeID
+                }
+            }
+
+            function generateStudents() {
+                const start = parseInt(els.startSeat.value) || 1;
+                const end = parseInt(els.endSeat.value) || 40;
+                const exclude = els.excludeSeats.value.split(',').map(n => parseInt(n.trim())).filter(n => !isNaN(n));
+                const newStudents = [];
+                for (let i = start; i <= end; i++) {
+                    if (!exclude.includes(i)) {
+                        let exist = students.find(s => s.seatNumber === i);
+                        if (!exist) exist = PRELOADED_STUDENTS.find(s => s.seatNumber === i);
+                        newStudents.push({ seatNumber: i, name: exist ? exist.name : '' });
+                    }
+                }
+                students = newStudents;
+                if(currentTab === 'daily') render();
+            }
+
+            function getActiveAssignment() {
+                if (!activeAssignmentId || assignments.length === 0) return null;
+                return assignments.find(a => a.id === activeAssignmentId) || assignments[0];
+            }
+
+            function renderSummary(targetStatus) {
+                currentSummaryStatus = targetStatus;
+                const isMissing = targetStatus === 'not-submitted';
+                els.summaryTitle.textContent = isMissing ? '🚨 全班缺交總表' : '🔧 全班訂正總表';
+                els.summaryTitle.className = isMissing ? 'text-2xl font-bold text-red-600' : 'text-2xl font-bold text-blue-600';
+                
+                const badgeColorClass = isMissing ? 'bg-red-50 text-red-700 border-red-200' : 'bg-blue-50 text-blue-700 border-blue-200';
+                const badgeHoverClass = isMissing ? 'hover:bg-red-500 hover:text-white hover:border-red-600' : 'hover:bg-blue-500 hover:text-white hover:border-blue-600';
+                const btnColorClass = isMissing ? 'bg-rose-500 hover:bg-rose-600 shadow-rose-200' : 'bg-blue-500 hover:bg-blue-600 shadow-blue-200';
+
+                els.summaryGrid.innerHTML = '';
+                els.summaryEmpty.classList.add('hidden');
+                els.summaryGrid.classList.remove('hidden');
+
+                let hasAnyRecords = false;
+                const todayObj = new Date();
+                const offset = todayObj.getTimezoneOffset() * 60000;
+                const localISOToday = (new Date(todayObj - offset)).toISOString().slice(0, 10);
+                
+                let sortedDates = Object.keys(allData).filter(dateStr => dateStr < localISOToday);
+
+                if (summaryViewMode === 'by-assignment') {
+                    sortedDates.sort((a, b) => new Date(a) - new Date(b));
+                } else {
+                    sortedDates.sort((a, b) => new Date(b) - new Date(a));
+                }
+
+                if (summaryViewMode === 'by-student') {
+                    els.summaryGrid.className = 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6';
+                    let summaryData = {}; 
+
+                    sortedDates.forEach(date => {
+                        let dayAssignments = allData[date];
+                        dayAssignments.forEach(assign => {
+                            students.forEach(s => {
+                                let status = assign.records[s.seatNumber] || 'not-submitted';
+                                if (status === targetStatus) {
+                                    if (!summaryData[s.seatNumber]) {
+                                        summaryData[s.seatNumber] = { name: s.name, items: [] };
+                                    }
+                                    summaryData[s.seatNumber].items.push({
+                                        date: date,
+                                        assignId: assign.id,
+                                        assignName: assign.name
+                                    });
+                                    hasAnyRecords = true;
+                                }
+                            });
+                        });
+                    });
+
+                    Object.keys(summaryData).sort((a,b) => parseInt(a) - parseInt(b)).forEach(seat => {
+                        const studentData = summaryData[seat];
+                        const card = document.createElement('div');
+                        card.className = 'summary-card bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden';
+                        
+                        const header = document.createElement('div');
+                        header.className = 'bg-gray-50 px-4 py-3 border-b border-gray-100 flex justify-between items-center';
+                        header.innerHTML = `
+                            <div class="flex items-center gap-2">
+                                <span class="text-xl font-black text-gray-700">${seat}</span>
+                                <span class="font-bold text-gray-600">${studentData.name}</span>
+                            </div>
+                            <span class="text-xs font-bold px-2 py-1 rounded-full ${isMissing ? 'bg-red-100 text-red-600' : 'bg-blue-100 text-blue-600'}">
+                                共 ${studentData.items.length} 項
+                            </span>
+                        `;
+                        card.appendChild(header);
+
+                        const body = document.createElement('div');
+                        body.className = 'p-4 flex flex-wrap gap-2';
+
+                        studentData.items.forEach(item => {
+                            const badge = document.createElement('div');
+                            const shortDate = item.date.substring(5).replace('-', '/');
+                            badge.className = `badge-resolve px-3 py-1.5 rounded-lg border text-sm font-bold flex flex-col items-start ${badgeColorClass} ${badgeHoverClass} shadow-sm`;
+                            badge.innerHTML = `
+                                <span class="text-[10px] opacity-70 leading-none mb-1">${shortDate}</span>
+                                <span class="leading-none">${item.assignName}</span>
+                            `;
+                            badge.onclick = () => resolveRecord(item.date, item.assignId, parseInt(seat));
+                            body.appendChild(badge);
+                        });
+
+                        card.appendChild(body);
+                        els.summaryGrid.appendChild(card);
+                    });
+
+                } else {
+                    els.summaryGrid.className = 'flex flex-col gap-4'; 
+                    
+                    sortedDates.forEach(date => {
+                        let dayAssignments = allData[date];
+                        dayAssignments.forEach(assign => {
+                            let missingStudents = [];
+                            
+                            students.forEach(s => {
+                                let status = assign.records[s.seatNumber] || 'not-submitted';
+                                if (status === targetStatus) {
+                                    missingStudents.push(s);
+                                }
+                            });
+                            
+                            if (missingStudents.length > 0) {
+                                hasAnyRecords = true;
+                                const shortDate = date.substring(5).replace('-', '/');
+                                
+                                const card = document.createElement('div');
+                                card.className = 'flex flex-col md:flex-row bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden';
+                                
+                                const headerColor = isMissing ? 'bg-[#4A89F3]' : 'bg-[#4A89F3]'; 
+                                const leftBox = document.createElement('div');
+                                leftBox.className = `w-full md:w-56 ${headerColor} text-white p-5 flex flex-col justify-center gap-2 flex-shrink-0`;
+                                leftBox.innerHTML = `
+                                    <div class="text-xl font-bold flex items-center gap-2">
+                                        <span>📝</span> <span>${assign.name}</span>
+                                    </div>
+                                    <div class="flex gap-2">
+                                        <span class="bg-white/20 text-white/90 text-sm px-3 py-1 rounded-full w-fit flex items-center gap-1">
+                                            📅 ${shortDate}
+                                        </span>
+                                        <span class="bg-white/20 text-white/90 text-sm px-3 py-1 rounded-full w-fit">
+                                            ${isMissing ? '缺交' : '待訂正'}: ${missingStudents.length} 名
+                                        </span>
+                                    </div>
+                                `;
+                                
+                                const rightBox = document.createElement('div');
+                                rightBox.className = 'p-5 flex-1 flex flex-wrap gap-3 items-center md:border-l border-gray-100 bg-white';
+                                
+                                missingStudents.sort((a,b) => a.seatNumber - b.seatNumber).forEach(s => {
+                                    const btn = document.createElement('div');
+                                    btn.className = `w-14 h-14 ${btnColorClass} text-white text-2xl font-bold rounded-2xl shadow transition transform hover:-translate-y-1 flex items-center justify-center cursor-pointer relative group`;
+                                    
+                                    btn.innerHTML = `
+                                        <span>${s.seatNumber}</span>
+                                        <div class="absolute inset-0 bg-black/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-sm tracking-widest rounded-2xl">
+                                            OK
+                                        </div>
+                                    `;
+                                    
+                                    btn.onclick = () => resolveRecord(date, assign.id, s.seatNumber);
+                                    rightBox.appendChild(btn);
+                                });
+                                
+                                card.appendChild(leftBox);
+                                card.appendChild(rightBox);
+                                els.summaryGrid.appendChild(card);
+                            }
+                        });
+                    });
+                }
+
+                if (!hasAnyRecords) {
+                    els.summaryGrid.classList.add('hidden');
+                    els.summaryEmpty.classList.remove('hidden');
+                    els.summaryEmpty.querySelector('h3').textContent = isMissing ? '太棒了！全班作業都交齊了！' : '太棒了！沒有人需要訂正！';
+                }
+            }
+
+            function resolveRecord(dateStr, assignId, seatNumber) {
+                let dayAssignments = allData[dateStr];
+                if (dayAssignments) {
+                    let assign = dayAssignments.find(a => a.id === assignId);
+                    if (assign) {
+                        assign.records[seatNumber] = 'submitted'; 
+                    }
+                }
+                saveSpecificDateData(dateStr);
+                renderSummary(currentSummaryStatus);
+                if (dateStr === currentDate) loadAssignmentsForDate(currentDate);
+            }
+
+            function render() {
+                renderTabs();
+                renderGroupButtons();
+                renderGrid();
+                updateStats();
+                renderMiniCalendar();
+                
+                if (document.activeElement !== els.studentNamesInput) {
+                    els.studentNamesInput.value = students.map(s => `${s.seatNumber},${s.name}`).join('\n');
+                }
+                if (document.activeElement !== els.groupSettingsInput) {
+                    els.groupSettingsInput.value = studentGroups.map(g => `${g.name}: ${g.members.join(',')}`).join('\n');
+                }
+
+                const active = getActiveAssignment();
+                if (active) {
+                    els.currentAssignmentName.value = active.name;
+                    els.currentAssignmentName.disabled = false;
+                    els.currentAssignmentName.placeholder = '例如：國語習作';
+                    els.statsTitle.textContent = active.name;
+                    els.deleteAssignmentBtn.classList.remove('opacity-30', 'cursor-not-allowed');
+                } else {
+                    els.currentAssignmentName.value = '';
+                    els.currentAssignmentName.disabled = true;
+                    els.currentAssignmentName.placeholder = '本日無作業，請點擊上方綠色「＋」號新增';
+                    els.statsTitle.textContent = '無作業';
+                    els.deleteAssignmentBtn.classList.add('opacity-30', 'cursor-not-allowed');
+                }
+            }
+
+            function renderGroupButtons() {
+                els.groupButtonsContainer.innerHTML = '';
+                studentGroups.forEach((group, index) => {
+                    const btn = document.createElement('button');
+                    const colors = ['bg-red-100 text-red-700', 'bg-orange-100 text-orange-700', 'bg-yellow-100 text-yellow-700', 'bg-green-100 text-green-700', 'bg-blue-100 text-blue-700', 'bg-purple-100 text-purple-700'];
+                    const colorClass = colors[index % colors.length];
+                    btn.className = `${colorClass} w-full font-bold py-2 px-2 rounded-lg shadow-sm transition flex flex-col items-center justify-center hover:opacity-80`;
+                    btn.innerHTML = `<span>${group.name}</span><span class="text-xs opacity-75 font-normal">一鍵繳交</span>`;
+                    btn.onclick = () => {
+                        const active = getActiveAssignment();
+                        if (!active) return alert("請先新增作業！");
+                        els.modalTitle.textContent = `${group.name} 全員繳交？`;
+                        els.modalDesc.textContent = `成員: ${group.members.join(', ')}`;
+                        pendingAction = () => {
+                            group.members.forEach(seatNum => {
+                                if (students.find(s => s.seatNumber === seatNum)) active.records[seatNum] = 'submitted';
+                            });
+                            render();
+                            saveData();
+                        };
+                        els.modal.classList.remove('hidden');
+                    };
+                    els.groupButtonsContainer.appendChild(btn);
+                });
+            }
+
+            function renderTabs() {
+                els.assignmentTabs.innerHTML = '';
+                assignments.forEach(assign => {
+                    const hasUnsubmitted = students.some(s => (assign.records[s.seatNumber] || 'not-submitted') === 'not-submitted');
+                    const hasToBeCorrected = students.some(s => assign.records[s.seatNumber] === 'to-be-corrected');
+                    const btn = document.createElement('button');
+                    const isActive = assign.id === activeAssignmentId;
+                    let classes = "tab-btn px-4 py-1.5 rounded-full border text-sm font-medium transition-colors duration-200 ";
+                    if (isActive) {
+                        if (hasUnsubmitted) classes += "bg-red-500 text-white border-red-600 shadow-md ring-2 ring-red-300";
+                        else if (hasToBeCorrected) classes += "bg-blue-400 text-white border-blue-500 shadow-md ring-2 ring-blue-200";
+                        else classes += "bg-green-500 text-white border-green-600 shadow-md";
+                    } else {
+                        if (hasUnsubmitted) classes += "bg-red-100 text-red-700 border-red-200 hover:bg-red-200";
+                        else if (hasToBeCorrected) classes += "bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100";
+                        else classes += "bg-white text-gray-600 border-gray-300 hover:bg-gray-50";
+                    }
+                    btn.className = classes;
+                    btn.textContent = assign.name;
+                    btn.onclick = () => { activeAssignmentId = assign.id; render(); };
+                    els.assignmentTabs.appendChild(btn);
+                });
+            }
+
+            function renderGrid() {
+                els.studentGrid.innerHTML = '';
+                const active = getActiveAssignment();
+                if (!active) {
+                    els.studentGrid.innerHTML = '<div class="col-span-full text-center text-gray-400 py-10 font-bold bg-white rounded-xl border-2 border-dashed border-gray-200">本日無作業，請點擊上方綠色「＋」按鈕新增作業。</div>';
+                    return;
+                }
+                students.forEach(student => {
+                    const currentStatus = active.records[student.seatNumber] || 'not-submitted';
+                    const statusInfo = statusMap[currentStatus];
+                    const div = document.createElement('div');
+                    div.className = `student-grid-item p-2 rounded-lg text-center cursor-pointer font-bold text-lg shadow select-none ${statusInfo.className}`;
+                    div.dataset.seat = student.seatNumber;
+                    div.innerHTML = `<div class="text-2xl pointer-events-none">${student.seatNumber}</div><div class="text-sm truncate px-1 pointer-events-none">${student.name || '　'}</div><div class="text-xs mt-1 border-t border-current border-opacity-20 pt-1 pointer-events-none">${statusInfo.text}</div>`;
+                    els.studentGrid.appendChild(div);
+                });
+            }
+
+            function updateStats() {
+                const active = getActiveAssignment();
+                if (!active) {
+                    els.notSubmittedCount.textContent = '0';
+                    els.toBeCorrectedCount.textContent = '0';
+                    els.submittedCount.textContent = '0';
+                    els.notSubmittedList.textContent = '無';
+                    els.toBeCorrectedList.textContent = '無';
+                    return;
+                }
+                let notSubmitted = [], toBeCorrected = [], submitted = [];
+                students.forEach(s => {
+                    const status = active.records[s.seatNumber] || 'not-submitted';
+                    if (status === 'not-submitted') notSubmitted.push(s.seatNumber);
+                    else if (status === 'to-be-corrected') toBeCorrected.push(s.seatNumber);
+                    else submitted.push(s.seatNumber);
+                });
+                els.notSubmittedCount.textContent = notSubmitted.length;
+                els.toBeCorrectedCount.textContent = toBeCorrected.length;
+                els.submittedCount.textContent = submitted.length;
+                els.notSubmittedList.textContent = notSubmitted.join(', ') || '無';
+                els.toBeCorrectedList.textContent = toBeCorrected.join(', ') || '無';
+            }
+
+            function renderMiniCalendar() {
+                const year = calendarDate.getFullYear();
+                const month = calendarDate.getMonth();
+                els.calendarTitle.textContent = `${year} 年 ${month + 1} 月`;
+                els.miniCalendarGrid.innerHTML = '';
+                const firstDay = new Date(year, month, 1).getDay();
+                const daysInMonth = new Date(year, month + 1, 0).getDate();
+                for (let i = 0; i < firstDay; i++) els.miniCalendarGrid.appendChild(document.createElement('div'));
+                for (let d = 1; d <= daysInMonth; d++) {
+                    const mm = (month + 1).toString().padStart(2, '0');
+                    const dd = d.toString().padStart(2, '0');
+                    const dateStr = `${year}-${mm}-${dd}`;
+                    const cell = document.createElement('div');
+                    cell.className = 'calendar-day hover:bg-gray-100 rounded-full cursor-pointer flex flex-col items-center justify-center';
+                    cell.textContent = d;
+                    if (dateStr === currentDate) cell.classList.add('active');
+                    if (allData[dateStr] && allData[dateStr].length > 0) {
+                        const dayAssignments = allData[dateStr];
+                        let hasUnsubmitted = false, hasToBeCorrected = false;
+                        for (const assign of dayAssignments) {
+                            if (students.some(s => (assign.records[s.seatNumber] || 'not-submitted') === 'not-submitted')) { hasUnsubmitted = true; break; }
+                            if (students.some(s => assign.records[s.seatNumber] === 'to-be-corrected')) hasToBeCorrected = true;
+                        }
+                        const dot = document.createElement('div');
+                        dot.className = 'status-dot';
+                        if (hasUnsubmitted) dot.classList.add('dot-red');
+                        else if (hasToBeCorrected) dot.classList.add('dot-blue');
+                        else dot.classList.add('dot-green');
+                        cell.appendChild(dot);
+                    }
+                    cell.onclick = () => { els.dateInput.value = dateStr; currentDate = dateStr; loadAssignmentsForDate(currentDate); render(); };
+                    els.miniCalendarGrid.appendChild(cell);
+                }
+            }
+
+            // --- Listeners ---
+            els.loginBtn.addEventListener('click', () => {
+                if (!auth) return alert("Firebase 初始化失敗，請檢查網路。");
+                const provider = new firebase.auth.GoogleAuthProvider();
+                auth.signInWithPopup(provider).catch(e => alert("登入失敗: " + e.message));
+            });
+            els.logoutBtn.addEventListener('click', () => auth && auth.signOut());
+            
+            els.dateInput.addEventListener('change', (e) => { currentDate = e.target.value; calendarDate = new Date(currentDate); loadAssignmentsForDate(currentDate); render(); });
+            els.prevMonthBtn.addEventListener('click', () => { calendarDate.setMonth(calendarDate.getMonth() - 1); renderMiniCalendar(); });
+            els.nextMonthBtn.addEventListener('click', () => { calendarDate.setMonth(calendarDate.getMonth() + 1); renderMiniCalendar(); });
+            
+            els.csvUpload.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = function(evt) {
+                    const text = evt.target.result;
+                    const rows = text.split('\n').filter(row => row.trim() !== '');
+                    let min = 999, max = 0;
+                    const newStudents = [];
+                    rows.forEach(row => {
+                        const cols = row.split(',');
+                        if (cols.length >= 1) {
+                            const seat = parseInt(cols[0].trim());
+                            if (!isNaN(seat)) {
+                                const name = cols[1] ? cols[1].trim() : '';
+                                newStudents.push({ seatNumber: seat, name: name });
+                                if (seat > max) max = seat;
+                                if (seat < min) min = seat;
+                            }
+                        }
+                    });
+                    if (newStudents.length > 0) {
+                        students = newStudents.sort((a,b) => a.seatNumber - b.seatNumber);
+                        els.startSeat.value = min;
+                        els.endSeat.value = max;
+                        els.excludeSeats.value = '';
+                        render();
+                        saveSettings(); 
+                    }
+                };
+                reader.readAsText(file);
+            });
+
+            [els.startSeat, els.endSeat, els.excludeSeats].forEach(input => input.addEventListener('change', () => { generateStudents(); saveSettings(); }));
+            
+            els.studentNamesInput.addEventListener('change', () => {
+                const lines = els.studentNamesInput.value.split('\n');
+                const nameMap = {};
+                lines.forEach(line => {
+                    let seat, name;
+                    if (line.includes(',')) { const p = line.split(','); seat = parseInt(p[0]); name = p.slice(1).join(',').trim(); }
+                    else { const m = line.match(/^(\d+)[號.\s]*(.*)$/); if(m) { seat = parseInt(m[1]); name = m[2].trim(); } }
+                    if (seat) nameMap[seat] = name;
+                });
+                students.forEach(s => { if (nameMap[s.seatNumber]) s.name = nameMap[s.seatNumber]; });
+                if(currentTab === 'daily') render(); saveSettings();
+            });
+
+            els.groupSettingsInput.addEventListener('change', () => {
+                const lines = els.groupSettingsInput.value.split('\n');
+                const newGroups = [];
+                lines.forEach(line => {
+                    if (!line.includes(':')) return;
+                    const [name, memStr] = line.split(':');
+                    const members = memStr.split(/[,\s]+/).map(s => parseInt(s)).filter(n => !isNaN(n));
+                    if (name && members.length) newGroups.push({ name: name.trim(), members });
+                });
+                if (newGroups.length) { studentGroups = newGroups; if(currentTab === 'daily') render(); saveSettings(); }
+            });
+
+            els.studentGrid.addEventListener('click', (e) => {
+                const t = e.target.closest('.student-grid-item'); if(!t) return;
+                const seat = parseInt(t.dataset.seat);
+                const active = getActiveAssignment();
+                if(!active) return;
+                const curr = active.records[seat] || 'not-submitted';
+                active.records[seat] = statusCycle[(statusCycle.indexOf(curr) + 1) % statusCycle.length];
+                render(); saveData();
+            });
+
+            els.addAssignmentBtn.addEventListener('click', () => {
+                const newId = `assign_${currentDate}_${Date.now()}`;
+                const num = assignments.length + 1;
+                assignments.push({ id: newId, name: `作業 ${num}`, records: {} });
+                activeAssignmentId = newId; render(); saveData();
+            });
+            
+            els.currentAssignmentName.addEventListener('change', (e) => {
+                const active = getActiveAssignment(); 
+                if(active) { 
+                    active.name = e.target.value; 
+                    renderTabs(); 
+                    els.statsTitle.textContent = active.name; 
+                    saveData(); 
+                }
+            });
+            
+            els.deleteAssignmentBtn.addEventListener('click', () => {
+                const active = getActiveAssignment();
+                if(!active) return;
+                if(confirm(`確定要刪除「${active.name}」嗎？`)) { 
+                    assignments = assignments.filter(a => a.id !== activeAssignmentId); 
+                    allData[currentDate] = assignments;
+                    if(assignments.length > 0) {
+                        activeAssignmentId = assignments[0].id; 
+                    } else {
+                        activeAssignmentId = '';
+                    }
+                    render(); 
+                    saveData(); 
+                }
+            });
+
+            els.markAllBtn.addEventListener('click', () => {
+                const active = getActiveAssignment();
+                if(!active) return alert("請先新增作業！");
+                els.modalTitle.textContent = '全部標記為繳交？'; els.modalDesc.textContent = '覆蓋當前作業狀態';
+                pendingAction = () => { students.forEach(s => active.records[s.seatNumber] = 'submitted'); render(); saveData(); };
+                els.modal.classList.remove('hidden');
+            });
+            els.modalConfirm.addEventListener('click', () => { if(pendingAction) pendingAction(); els.modal.classList.add('hidden'); });
+            els.modalCancel.addEventListener('click', () => els.modal.classList.add('hidden'));
+            
+            els.downloadBtn.addEventListener('click', () => {
+                let csv = "\ufeff日期," + currentDate + "\n\n座號,姓名";
+                if(assignments.length > 0) {
+                    csv += "," + assignments.map(a => a.name).join(',');
+                }
+                csv += "\n";
+                students.forEach(s => {
+                    csv += `${s.seatNumber},${s.name}`;
+                    assignments.forEach(a => {
+                        const statusKey = a.records[s.seatNumber] || 'not-submitted';
+                        csv += `,${statusMap[statusKey].text}`;
+                    });
+                    csv += "\n";
+                });
+                const link = document.createElement("a");
+                link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+                link.download = `${currentDate}_紀錄.csv`;
+                link.click();
+            });
+        });
+    </script>
+</body>
+</html>
