@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>多作業繳交紀錄 v16.3 (請假防護罩連動版)</title>
+    <title>多作業繳交紀錄 v16.4 (請假即時連動版)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
     
@@ -65,7 +65,7 @@
         <!-- 標題與登入區 -->
         <header class="flex flex-col md:flex-row justify-between items-center relative gap-4">
             <div class="text-center md:text-left">
-                <h1 class="text-3xl sm:text-4xl font-bold text-gray-700">每日作業繳交紀錄</h1>
+                <h1 class="text-3xl sm:text-4xl font-bold text-gray-700">每日作業繳交紀錄 <span class="text-sm text-blue-500 font-bold ml-2">v16.4</span></h1>
                 <p class="text-lg text-gray-500 mt-2 flex items-center gap-2 justify-center md:justify-start">
                     <span id="app-mode-label">單機模式 (未登入)</span>
                     <span id="save-indicator" class="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full hidden">已存檔</span>
@@ -338,7 +338,7 @@
                 
                 viewByAssignBtn: document.getElementById('view-by-assignment'),
                 viewByStudentBtn: document.getElementById('view-by-student'),
-                csvUpload: document.getElementById('csv-upload') // Added to fix addEventListener error
+                csvUpload: document.getElementById('csv-upload')
             };
 
             let students = [...PRELOADED_STUDENTS];
@@ -358,6 +358,7 @@
             let currentUser = null;
             let unsubscribeData = null;
             let unsubscribeSettings = null;
+            let unsubscribeBoard = null; // 新增：用於監聽看板資料
             let db = null;
             let auth = null;
 
@@ -374,7 +375,6 @@
                     auth = firebase.auth();
                     db = firebase.firestore();
 
-                    // Enable offline persistence
                     db.enablePersistence({ synchronizeTabs: true })
                         .catch(function(err) {
                             console.warn("Firestore 離線模式啟用失敗: ", err.code);
@@ -483,9 +483,14 @@
                 if (storedData) allData = JSON.parse(storedData);
                 else allData = {};
                 
-                const storedAbsent = localStorage.getItem(LOCAL_STORAGE_KEY_ABSENT);
-                if (storedAbsent) absentData = JSON.parse(storedAbsent);
-                else absentData = {};
+                // 單機模式下，讀取看板的 LocalStorage 資料來連動請假
+                const boardLocal = localStorage.getItem('blackboard_v4_data');
+                if (boardLocal) {
+                    const parsedBoard = JSON.parse(boardLocal);
+                    Object.keys(parsedBoard).forEach(date => {
+                        absentData[date] = parsedBoard[date].absentSeats || [];
+                    });
+                }
 
                 const storedConfig = localStorage.getItem(LOCAL_STORAGE_KEY_CONFIG);
                 if (storedConfig) {
@@ -527,16 +532,15 @@
                     }
                 });
 
+                // 監聽作業庫 (獲取作業名單與狀態)
                 const recordsRef = db.collection('users').doc(user.uid).collection('daily_records');
                 unsubscribeData = recordsRef.onSnapshot((snapshot) => {
                     snapshot.docChanges().forEach((change) => {
                         const date = change.doc.id;
                         if (change.type === "removed") {
                             delete allData[date];
-                            delete absentData[date];
                         } else {
                             allData[date] = change.doc.data().assignments || [];
-                            absentData[date] = change.doc.data().absentSeats || [];
                         }
                     });
                     loadAssignmentsForDate(currentDate);
@@ -545,6 +549,21 @@
                     else switchTab(currentTab);
 
                     els.loadingOverlay.style.display = 'none';
+                });
+
+                // 🛡️ 新增：獨立監聽電子看板資料庫 (獲取即時請假名單)
+                const boardRef = db.collection('users').doc(user.uid).collection('board_records');
+                unsubscribeBoard = boardRef.onSnapshot((snapshot) => {
+                    snapshot.docChanges().forEach((change) => {
+                        const date = change.doc.id;
+                        if (change.type === "removed") {
+                            delete absentData[date];
+                        } else {
+                            absentData[date] = change.doc.data().absentSeats || [];
+                        }
+                    });
+                    if(currentTab === 'daily') render();
+                    else switchTab(currentTab);
                 });
             }
 
@@ -556,6 +575,7 @@
                 els.logoutBtn.classList.add('hidden');
                 if (unsubscribeData) unsubscribeData();
                 if (unsubscribeSettings) unsubscribeSettings();
+                if (unsubscribeBoard) unsubscribeBoard();
                 loadLocalData();
                 loadAssignmentsForDate(currentDate);
                 switchTab('daily');
@@ -568,13 +588,12 @@
             function saveSpecificDateData(dateStrToSave) {
                 showSaveStatus("儲存中...");
                 const payload = {
-                    assignments: allData[dateStrToSave] || [],
-                    absentSeats: absentData[dateStrToSave] || []
+                    assignments: allData[dateStrToSave] || []
+                    // 不在此處寫入 absentSeats，因為看板才是請假的單一真相來源 (Source of Truth)
                 };
                 
                 if (isCloudMode && currentUser) {
                     const docRef = db.collection('users').doc(currentUser.uid).collection('daily_records').doc(dateStrToSave);
-                    // 完整寫入雙資料，避免互相覆蓋
                     docRef.set(payload)
                         .then(() => showSaveStatus("已同步至雲端"))
                         .catch((error) => {
@@ -583,7 +602,6 @@
                         });
                 } else {
                     localStorage.setItem(LOCAL_STORAGE_KEY_DATA, JSON.stringify(allData));
-                    localStorage.setItem(LOCAL_STORAGE_KEY_ABSENT, JSON.stringify(absentData));
                     showSaveStatus("已儲存至本機");
                 }
             }
