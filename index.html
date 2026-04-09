@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>多作業繳交紀錄 v16.4 (請假即時連動版)</title>
+    <title>多作業繳交紀錄 v16.5 (終極請假防護版)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
     
@@ -65,7 +65,7 @@
         <!-- 標題與登入區 -->
         <header class="flex flex-col md:flex-row justify-between items-center relative gap-4">
             <div class="text-center md:text-left">
-                <h1 class="text-3xl sm:text-4xl font-bold text-gray-700">每日作業繳交紀錄 <span class="text-sm text-blue-500 font-bold ml-2">v16.4</span></h1>
+                <h1 class="text-3xl sm:text-4xl font-bold text-gray-700">每日作業繳交紀錄 <span class="text-sm text-blue-500 font-bold ml-2">v16.5</span></h1>
                 <p class="text-lg text-gray-500 mt-2 flex items-center gap-2 justify-center md:justify-start">
                     <span id="app-mode-label">單機模式 (未登入)</span>
                     <span id="save-indicator" class="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full hidden">已存檔</span>
@@ -189,7 +189,7 @@
                 <div class="flex justify-between items-end mb-4 px-1">
                     <div>
                         <h2 class="text-2xl font-bold text-gray-700">學生列表</h2>
-                        <p class="text-sm text-gray-400">點擊：未交 → 繳交 → 待訂正 → 繳交 (灰色表示今日請假鎖定)</p>
+                        <p class="text-sm text-gray-400">點擊：未交 → 繳交 → 待訂正 → 繳交 (灰色表示該生今日請假，但仍可點擊修改)</p>
                     </div>
                     <button id="mark-all-submitted" class="text-sm bg-blue-100 text-blue-700 hover:bg-blue-200 px-4 py-2 rounded-full font-bold transition shadow-sm">
                         一鍵全班繳交
@@ -205,7 +205,7 @@
             <div class="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
                     <h2 id="summary-title" class="text-2xl font-bold text-gray-700">總表載入中...</h2>
-                    <p class="text-sm text-gray-500 mt-1" id="summary-subtitle">點擊座位按鈕即可瞬間標記為「已繳交」！</p>
+                    <p class="text-sm text-gray-500 mt-1" id="summary-subtitle">點擊作業標籤即可瞬間標記為「已繳交」！</p>
                 </div>
                 
                 <div class="bg-gray-200 p-1 rounded-lg inline-flex shrink-0">
@@ -256,6 +256,9 @@
     </div>
 
     <script>
+        // ------------------------------------------------------------------
+        // ★★★ 請填入您的 Firebase 設定碼 (與作業 App 相同) ★★★
+        // ------------------------------------------------------------------
         const userFirebaseConfig = {
             apiKey: "AIzaSyC8ri0BEKk9hSzSZjq760eWHyNwo9Z2vqE",
             authDomain: "myhomeworktracker-bbcc3.firebaseapp.com",
@@ -301,6 +304,7 @@
                 deleteAssignmentBtn: document.getElementById('delete-assignment-btn'),
                 markAllBtn: document.getElementById('mark-all-submitted'),
                 downloadBtn: document.getElementById('download-csv'),
+                csvUpload: document.getElementById('csv-upload'),
                 modal: document.getElementById('custom-modal'),
                 modalTitle: document.getElementById('modal-title'),
                 modalDesc: document.getElementById('modal-desc'),
@@ -337,8 +341,7 @@
                 shieldIndicatorCorrection: document.getElementById('shield-indicator-correction'),
                 
                 viewByAssignBtn: document.getElementById('view-by-assignment'),
-                viewByStudentBtn: document.getElementById('view-by-student'),
-                csvUpload: document.getElementById('csv-upload')
+                viewByStudentBtn: document.getElementById('view-by-student')
             };
 
             let students = [...PRELOADED_STUDENTS];
@@ -358,7 +361,7 @@
             let currentUser = null;
             let unsubscribeData = null;
             let unsubscribeSettings = null;
-            let unsubscribeBoard = null; // 新增：用於監聽看板資料
+            let unsubscribeBoard = null; 
             let db = null;
             let auth = null;
 
@@ -483,7 +486,6 @@
                 if (storedData) allData = JSON.parse(storedData);
                 else allData = {};
                 
-                // 單機模式下，讀取看板的 LocalStorage 資料來連動請假
                 const boardLocal = localStorage.getItem('blackboard_v4_data');
                 if (boardLocal) {
                     const parsedBoard = JSON.parse(boardLocal);
@@ -532,7 +534,6 @@
                     }
                 });
 
-                // 監聽作業庫 (獲取作業名單與狀態)
                 const recordsRef = db.collection('users').doc(user.uid).collection('daily_records');
                 unsubscribeData = recordsRef.onSnapshot((snapshot) => {
                     snapshot.docChanges().forEach((change) => {
@@ -551,7 +552,6 @@
                     els.loadingOverlay.style.display = 'none';
                 });
 
-                // 🛡️ 新增：獨立監聽電子看板資料庫 (獲取即時請假名單)
                 const boardRef = db.collection('users').doc(user.uid).collection('board_records');
                 unsubscribeBoard = boardRef.onSnapshot((snapshot) => {
                     snapshot.docChanges().forEach((change) => {
@@ -589,7 +589,6 @@
                 showSaveStatus("儲存中...");
                 const payload = {
                     assignments: allData[dateStrToSave] || []
-                    // 不在此處寫入 absentSeats，因為看板才是請假的單一真相來源 (Source of Truth)
                 };
                 
                 if (isCloudMode && currentUser) {
@@ -667,8 +666,13 @@
                 const badgeHoverClass = isMissing ? 'hover:bg-red-500 hover:text-white hover:border-red-600' : 'hover:bg-blue-500 hover:text-white hover:border-blue-600';
                 const btnColorClass = isMissing ? 'bg-rose-500 hover:bg-rose-600 shadow-rose-200' : 'bg-blue-500 hover:bg-blue-600 shadow-blue-200';
 
-                // --- 🛡️ 啟動請假防護罩邏輯 ---
-                const currentlyAbsentSeats = absentData[currentDate] || [];
+                // --- 🛡️ 啟動請假防護罩邏輯 (使用現實中的今天) ---
+                const todayObj = new Date();
+                const offset = todayObj.getTimezoneOffset() * 60000;
+                const realTodayStr = (new Date(todayObj - offset)).toISOString().slice(0, 10);
+                
+                // 總表的防護罩嚴格依據「現實中的今天」是否請假
+                const currentlyAbsentSeats = absentData[realTodayStr] || [];
                 
                 if (currentlyAbsentSeats.length > 0) {
                     els.shieldIndicatorMissing.classList.remove('hidden');
@@ -684,8 +688,8 @@
 
                 let hasAnyRecords = false;
                 
-                // 抓出「當前選擇日期」以前的所有日子
-                let sortedDates = Object.keys(allData).filter(dateStr => dateStr < currentDate);
+                // 抓出「現實中今天(含)以前」的所有日子
+                let sortedDates = Object.keys(allData).filter(dateStr => dateStr <= realTodayStr);
 
                 if (summaryViewMode === 'by-assignment') {
                     sortedDates.sort((a, b) => new Date(a) - new Date(b));
@@ -701,7 +705,7 @@
                         let dayAssignments = allData[date];
                         dayAssignments.forEach(assign => {
                             students.forEach(s => {
-                                // 🛡️ 防護罩攔截：如果他今天請假，不顯示他過去的紀錄
+                                // 🛡️ 防護罩攔截：如果他「今天」請假，不顯示他過去的紀錄
                                 if (currentlyAbsentSeats.includes(s.seatNumber)) return; 
 
                                 let status = assign.records[s.seatNumber] || 'not-submitted';
@@ -958,12 +962,12 @@
                     const div = document.createElement('div');
                     
                     if (isAbsent) {
-                        // 🔒 請假鎖定狀態
-                        div.className = `student-grid-item p-2 rounded-lg text-center font-bold text-lg shadow select-none bg-gray-200 text-gray-400 opacity-60`;
+                        // 🔒 請假狀態 (解除強制鎖定，讓老師事後補交可以點擊)
+                        div.className = `student-grid-item clickable p-2 rounded-lg text-center font-bold text-lg shadow select-none bg-gray-200 text-gray-400 opacity-60`;
                         div.dataset.seat = student.seatNumber;
                         div.innerHTML = `<div class="text-2xl pointer-events-none">${student.seatNumber}</div><div class="text-sm truncate px-1 pointer-events-none">${student.name || '　'}</div><div class="text-xs mt-1 border-t border-gray-300 pt-1 pointer-events-none">🔒 請假</div>`;
                     } else {
-                        // 正常可點擊狀態
+                        // 正常狀態
                         div.className = `student-grid-item clickable p-2 rounded-lg text-center font-bold text-lg shadow select-none ${statusInfo.className}`;
                         div.dataset.seat = student.seatNumber;
                         div.innerHTML = `<div class="text-2xl pointer-events-none">${student.seatNumber}</div><div class="text-sm truncate px-1 pointer-events-none">${student.name || '　'}</div><div class="text-xs mt-1 border-t border-current border-opacity-20 pt-1 pointer-events-none">${statusInfo.text}</div>`;
@@ -988,7 +992,7 @@
                 const currentAbsent = absentData[currentDate] || [];
 
                 students.forEach(s => {
-                    // 🛡️ 統計時自動忽略請假的同學
+                    // 🛡️ 統計時自動忽略「當天」請假的同學
                     if (currentAbsent.includes(s.seatNumber)) return; 
 
                     const status = active.records[s.seatNumber] || 'not-submitted';
@@ -1123,9 +1127,9 @@
                 const t = e.target.closest('.student-grid-item'); if(!t) return;
                 const seat = parseInt(t.dataset.seat);
                 
-                // 🛡️ 點擊時，如果該生請假，直接略過阻擋點擊
-                const currentAbsent = absentData[currentDate] || [];
-                if (currentAbsent.includes(seat)) return; 
+                // 移除這裡的鎖定，允許老師手動點擊補交
+                // const currentAbsent = absentData[currentDate] || [];
+                // if (currentAbsent.includes(seat)) return; 
 
                 const active = getActiveAssignment();
                 if(!active) return;
