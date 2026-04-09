@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>多作業繳交紀錄 v16.6 (終極全域防護版)</title>
+    <title>多作業繳交紀錄 v16.7 (隔日結算防護版)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
     
@@ -65,7 +65,7 @@
         <!-- 標題與登入區 -->
         <header class="flex flex-col md:flex-row justify-between items-center relative gap-4">
             <div class="text-center md:text-left">
-                <h1 class="text-3xl sm:text-4xl font-bold text-gray-700">每日作業繳交紀錄 <span class="text-sm text-blue-500 font-bold ml-2">v16.6</span></h1>
+                <h1 class="text-3xl sm:text-4xl font-bold text-gray-700">每日作業繳交紀錄 <span class="text-sm text-blue-500 font-bold ml-2">v16.7</span></h1>
                 <p class="text-lg text-gray-500 mt-2 flex items-center gap-2 justify-center md:justify-start">
                     <span id="app-mode-label">單機模式 (未登入)</span>
                     <span id="save-indicator" class="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full hidden">已存檔</span>
@@ -177,7 +177,7 @@
 
                     <div class="bg-indigo-50 p-3 rounded-xl shadow-sm border border-indigo-100 mt-auto">
                         <h3 class="text-indigo-800 font-bold mb-2 flex items-center gap-1 text-sm">
-                            各家一鍵繳交 (自動略過今日請假者)
+                            各家一鍵繳交 (自動略過請假者)
                         </h3>
                         <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2" id="group-buttons-container"></div>
                     </div>
@@ -189,7 +189,7 @@
                 <div class="flex justify-between items-end mb-4 px-1">
                     <div>
                         <h2 class="text-2xl font-bold text-gray-700">學生列表</h2>
-                        <p class="text-sm text-gray-400">點擊：未交 → 繳交 → 待訂正 → 繳交 (灰色表示該生<strong class="text-red-500">今日</strong>請假，強制鎖定)</p>
+                        <p class="text-sm text-gray-400">點擊：未交 → 繳交 → 待訂正 → 繳交 (灰色表示該生今日請假，強制鎖定)</p>
                     </div>
                     <button id="mark-all-submitted" class="text-sm bg-blue-100 text-blue-700 hover:bg-blue-200 px-4 py-2 rounded-full font-bold transition shadow-sm">
                         一鍵全班繳交
@@ -256,9 +256,6 @@
     </div>
 
     <script>
-        // ------------------------------------------------------------------
-        // ★★★ 請填入您的 Firebase 設定碼 (與作業 App 相同) ★★★
-        // ------------------------------------------------------------------
         const userFirebaseConfig = {
             apiKey: "AIzaSyC8ri0BEKk9hSzSZjq760eWHyNwo9Z2vqE",
             authDomain: "myhomeworktracker-bbcc3.firebaseapp.com",
@@ -691,11 +688,11 @@
 
                 let hasAnyRecords = false;
                 
-                // 抓出「現實中今天(含)以前」的所有日子
+                // 抓出「現實中昨天(含)以前」的所有日子 (今天的作業明天才算缺交)
                 const todayObj = new Date();
                 const offset = todayObj.getTimezoneOffset() * 60000;
                 const realTodayStr = (new Date(todayObj - offset)).toISOString().slice(0, 10);
-                let sortedDates = Object.keys(allData).filter(dateStr => dateStr <= realTodayStr);
+                let sortedDates = Object.keys(allData).filter(dateStr => dateStr < realTodayStr);
 
                 if (summaryViewMode === 'by-assignment') {
                     sortedDates.sort((a, b) => new Date(a) - new Date(b));
