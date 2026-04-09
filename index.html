@@ -3,28 +3,28 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>多作業繳交紀錄 v16.2 (完整修復版)</title>
+    <title>多作業繳交紀錄 v16.6 (終極全域防護版)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
     
-    <!-- Firebase SDK (相容模式，最穩定) -->
+    <!-- Firebase SDK (相容模式) -->
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
     <style>
         body { font-family: 'Inter', 'Noto Sans TC', sans-serif; background-color: #F0F4F8; }
-        .macaron-pink { background-color: #FFDFD3; }
-        .macaron-yellow { background-color: #FEF8DD; }
-        .macaron-green { background-color: #D4EDDA; }
-        .macaron-blue { background-color: #D1E7FD; }
-        .macaron-purple { background-color: #E2D9F3; }
         .status-submitted { background-color: #A7F3D0; color: #047857; }
         .status-not-submitted { background-color: #FECACA; color: #991B1B; }
         .status-to-be-corrected { background-color: #BFDBFE; color: #1E40AF; }
+        
+        /* 學生點名格動畫 */
         .student-grid-item { transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out; }
-        .student-grid-item:hover { transform: scale(1.05); box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        .student-grid-item.clickable:hover { transform: scale(1.05); box-shadow: 0 4px 12px rgba(0,0,0,0.1); cursor: pointer; }
+        
         .tab-btn { transition: all 0.2s; }
+        
+        /* 月曆樣式 */
         .calendar-day { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; border-radius: 9999px; font-size: 0.9rem; position: relative; transition: all 0.2s; }
         .calendar-day:hover { background-color: #E5E7EB; }
         .calendar-day.active { background-color: #3B82F6; color: white; font-weight: bold; }
@@ -32,6 +32,7 @@
         .dot-red { background-color: #EF4444; }
         .dot-blue { background-color: #3B82F6; }
         .dot-green { background-color: #10B981; }
+        
         #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.9); z-index: 100; display: none; justify-content: center; align-items: center; flex-direction: column; }
         
         /* Nav Tabs */
@@ -64,7 +65,7 @@
         <!-- 標題與登入區 -->
         <header class="flex flex-col md:flex-row justify-between items-center relative gap-4">
             <div class="text-center md:text-left">
-                <h1 class="text-3xl sm:text-4xl font-bold text-gray-700">每日作業繳交紀錄</h1>
+                <h1 class="text-3xl sm:text-4xl font-bold text-gray-700">每日作業繳交紀錄 <span class="text-sm text-blue-500 font-bold ml-2">v16.6</span></h1>
                 <p class="text-lg text-gray-500 mt-2 flex items-center gap-2 justify-center md:justify-start">
                     <span id="app-mode-label">單機模式 (未登入)</span>
                     <span id="save-indicator" class="text-xs bg-gray-200 text-gray-600 px-2 py-0.5 rounded-full hidden">已存檔</span>
@@ -90,8 +91,8 @@
         <!-- 主導航 Tabs -->
         <nav class="flex space-x-1 border-b border-gray-200">
             <button id="nav-daily" class="nav-tab active px-5 py-3 font-bold rounded-t-lg text-lg">📅 每日點名</button>
-            <button id="nav-missing" class="nav-tab px-5 py-3 font-bold rounded-t-lg text-lg">🚨 缺交總表</button>
-            <button id="nav-correction" class="nav-tab px-5 py-3 font-bold rounded-t-lg text-lg">🔧 訂正總表</button>
+            <button id="nav-missing" class="nav-tab px-5 py-3 font-bold rounded-t-lg text-lg flex items-center gap-2">🚨 缺交總表 <span id="shield-indicator-missing" class="hidden text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full border border-green-300">🛡️ 防護罩運作中</span></button>
+            <button id="nav-correction" class="nav-tab px-5 py-3 font-bold rounded-t-lg text-lg flex items-center gap-2">🔧 訂正總表 <span id="shield-indicator-correction" class="hidden text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full border border-green-300">🛡️ 防護罩運作中</span></button>
         </nav>
 
         <!-- 視圖 1：每日點名 -->
@@ -149,12 +150,12 @@
                             <h4 class="text-sm font-bold text-gray-500">目前作業統計：<span id="stats-title" class="text-blue-600 ml-1"></span></h4>
                         </div>
                         <div class="grid grid-cols-3 gap-4">
-                            <div class="bg-white p-2 rounded-lg shadow-sm border-l-4 border-red-500 flex flex-col items-center justify-center">
-                                <span class="text-xs text-gray-400">未交</span>
+                            <div class="bg-white p-2 rounded-lg shadow-sm border-l-4 border-red-500 flex flex-col items-center justify-center relative">
+                                <span class="text-xs text-gray-400">未交 (已排除請假)</span>
                                 <span id="not-submitted-count" class="text-xl sm:text-2xl font-bold text-red-600 leading-none mt-1">0</span>
                             </div>
                             <div class="bg-white p-2 rounded-lg shadow-sm border-l-4 border-blue-400 flex flex-col items-center justify-center">
-                                <span class="text-xs text-gray-400">待訂正</span>
+                                <span class="text-xs text-gray-400">待訂正 (已排除)</span>
                                 <span id="to-be-corrected-count" class="text-xl sm:text-2xl font-bold text-blue-500 leading-none mt-1">0</span>
                             </div>
                             <div class="bg-white p-2 rounded-lg shadow-sm border-l-4 border-green-500 flex flex-col items-center justify-center">
@@ -176,7 +177,7 @@
 
                     <div class="bg-indigo-50 p-3 rounded-xl shadow-sm border border-indigo-100 mt-auto">
                         <h3 class="text-indigo-800 font-bold mb-2 flex items-center gap-1 text-sm">
-                            各家一鍵繳交 (小老師專用)
+                            各家一鍵繳交 (自動略過今日請假者)
                         </h3>
                         <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2" id="group-buttons-container"></div>
                     </div>
@@ -188,7 +189,7 @@
                 <div class="flex justify-between items-end mb-4 px-1">
                     <div>
                         <h2 class="text-2xl font-bold text-gray-700">學生列表</h2>
-                        <p class="text-sm text-gray-400">點擊：未交 → 繳交 → 待訂正 → 繳交</p>
+                        <p class="text-sm text-gray-400">點擊：未交 → 繳交 → 待訂正 → 繳交 (灰色表示該生<strong class="text-red-500">今日</strong>請假，強制鎖定)</p>
                     </div>
                     <button id="mark-all-submitted" class="text-sm bg-blue-100 text-blue-700 hover:bg-blue-200 px-4 py-2 rounded-full font-bold transition shadow-sm">
                         一鍵全班繳交
@@ -204,7 +205,7 @@
             <div class="mb-6 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                 <div>
                     <h2 id="summary-title" class="text-2xl font-bold text-gray-700">總表載入中...</h2>
-                    <p class="text-sm text-gray-500 mt-1" id="summary-subtitle">點擊座位按鈕即可瞬間標記為「已繳交」！</p>
+                    <p class="text-sm text-gray-500 mt-1" id="summary-subtitle">點擊作業標籤即可瞬間標記為「已繳交」！</p>
                 </div>
                 
                 <div class="bg-gray-200 p-1 rounded-lg inline-flex shrink-0">
@@ -255,6 +256,9 @@
     </div>
 
     <script>
+        // ------------------------------------------------------------------
+        // ★★★ 請填入您的 Firebase 設定碼 (與作業 App 相同) ★★★
+        // ------------------------------------------------------------------
         const userFirebaseConfig = {
             apiKey: "AIzaSyC8ri0BEKk9hSzSZjq760eWHyNwo9Z2vqE",
             authDomain: "myhomeworktracker-bbcc3.firebaseapp.com",
@@ -280,6 +284,8 @@
         ];
         const LOCAL_STORAGE_KEY_DATA = 'homework_tracker_data';
         const LOCAL_STORAGE_KEY_CONFIG = 'homework_tracker_config';
+        const LOCAL_STORAGE_KEY_ABSENT = 'homework_tracker_absent';
+        
         const statusCycle = ['not-submitted', 'submitted', 'to-be-corrected', 'submitted-done'];
         const statusMap = { 'submitted': { text: '繳交', className: 'status-submitted' }, 'submitted-done': { text: '繳交', className: 'status-submitted' }, 'to-be-corrected': { text: '待訂正', className: 'status-to-be-corrected' }, 'not-submitted': { text: '未交', className: 'status-not-submitted' } };
 
@@ -298,6 +304,7 @@
                 deleteAssignmentBtn: document.getElementById('delete-assignment-btn'),
                 markAllBtn: document.getElementById('mark-all-submitted'),
                 downloadBtn: document.getElementById('download-csv'),
+                csvUpload: document.getElementById('csv-upload'),
                 modal: document.getElementById('custom-modal'),
                 modalTitle: document.getElementById('modal-title'),
                 modalDesc: document.getElementById('modal-desc'),
@@ -330,15 +337,17 @@
                 summaryTitle: document.getElementById('summary-title'),
                 summaryGrid: document.getElementById('summary-grid'),
                 summaryEmpty: document.getElementById('summary-empty'),
+                shieldIndicatorMissing: document.getElementById('shield-indicator-missing'),
+                shieldIndicatorCorrection: document.getElementById('shield-indicator-correction'),
                 
                 viewByAssignBtn: document.getElementById('view-by-assignment'),
-                viewByStudentBtn: document.getElementById('view-by-student'),
-                csvUpload: document.getElementById('csv-upload')
+                viewByStudentBtn: document.getElementById('view-by-student')
             };
 
             let students = [...PRELOADED_STUDENTS];
             let studentGroups = [...PRELOADED_GROUPS];
             let allData = {}; 
+            let absentData = {}; 
             let currentDate = '';
             let assignments = [];
             let activeAssignmentId = '';
@@ -352,6 +361,7 @@
             let currentUser = null;
             let unsubscribeData = null;
             let unsubscribeSettings = null;
+            let unsubscribeBoard = null; 
             let db = null;
             let auth = null;
 
@@ -368,7 +378,6 @@
                     auth = firebase.auth();
                     db = firebase.firestore();
 
-                    // 開啟 Firebase 離線支援 (如果斷網也能運作，連網後自動同步)
                     db.enablePersistence({ synchronizeTabs: true })
                         .catch(function(err) {
                             console.warn("Firestore 離線模式啟用失敗: ", err.code);
@@ -476,6 +485,14 @@
                 const storedData = localStorage.getItem(LOCAL_STORAGE_KEY_DATA);
                 if (storedData) allData = JSON.parse(storedData);
                 else allData = {};
+                
+                const boardLocal = localStorage.getItem('blackboard_v4_data');
+                if (boardLocal) {
+                    const parsedBoard = JSON.parse(boardLocal);
+                    Object.keys(parsedBoard).forEach(date => {
+                        absentData[date] = parsedBoard[date].absentSeats || [];
+                    });
+                }
 
                 const storedConfig = localStorage.getItem(LOCAL_STORAGE_KEY_CONFIG);
                 if (storedConfig) {
@@ -521,8 +538,11 @@
                 unsubscribeData = recordsRef.onSnapshot((snapshot) => {
                     snapshot.docChanges().forEach((change) => {
                         const date = change.doc.id;
-                        if (change.type === "removed") delete allData[date];
-                        else allData[date] = change.doc.data().assignments || [];
+                        if (change.type === "removed") {
+                            delete allData[date];
+                        } else {
+                            allData[date] = change.doc.data().assignments || [];
+                        }
                     });
                     loadAssignmentsForDate(currentDate);
                     
@@ -530,6 +550,20 @@
                     else switchTab(currentTab);
 
                     els.loadingOverlay.style.display = 'none';
+                });
+
+                const boardRef = db.collection('users').doc(user.uid).collection('board_records');
+                unsubscribeBoard = boardRef.onSnapshot((snapshot) => {
+                    snapshot.docChanges().forEach((change) => {
+                        const date = change.doc.id;
+                        if (change.type === "removed") {
+                            delete absentData[date];
+                        } else {
+                            absentData[date] = change.doc.data().absentSeats || [];
+                        }
+                    });
+                    if(currentTab === 'daily') render();
+                    else switchTab(currentTab);
                 });
             }
 
@@ -541,6 +575,7 @@
                 els.logoutBtn.classList.add('hidden');
                 if (unsubscribeData) unsubscribeData();
                 if (unsubscribeSettings) unsubscribeSettings();
+                if (unsubscribeBoard) unsubscribeBoard();
                 loadLocalData();
                 loadAssignmentsForDate(currentDate);
                 switchTab('daily');
@@ -552,10 +587,13 @@
 
             function saveSpecificDateData(dateStrToSave) {
                 showSaveStatus("儲存中...");
+                const payload = {
+                    assignments: allData[dateStrToSave] || []
+                };
+                
                 if (isCloudMode && currentUser) {
                     const docRef = db.collection('users').doc(currentUser.uid).collection('daily_records').doc(dateStrToSave);
-                    // 完全覆寫，允許清除最後一項作業
-                    docRef.set({ assignments: allData[dateStrToSave] || [] })
+                    docRef.set(payload, { merge: true })
                         .then(() => showSaveStatus("已同步至雲端"))
                         .catch((error) => {
                             console.error("同步錯誤:", error);
@@ -584,7 +622,6 @@
             }
 
             function loadAssignmentsForDate(dateStr) {
-                // 如果該日期沒有資料，預設為空陣列，不要強制產生作業
                 if (!allData[dateStr]) {
                     allData[dateStr] = []; 
                 }
@@ -594,7 +631,7 @@
                         activeAssignmentId = assignments[0].id;
                     }
                 } else {
-                    activeAssignmentId = ''; // 沒有作業時清空 activeID
+                    activeAssignmentId = ''; 
                 }
             }
 
@@ -619,6 +656,14 @@
                 return assignments.find(a => a.id === activeAssignmentId) || assignments[0];
             }
 
+            // --- ★ 終極全域請假防護機制 ★ ---
+            function getGlobalAbsentSeats() {
+                const todayObj = new Date();
+                const offset = todayObj.getTimezoneOffset() * 60000;
+                const realTodayStr = (new Date(todayObj - offset)).toISOString().slice(0, 10);
+                return absentData[realTodayStr] || [];
+            }
+
             function renderSummary(targetStatus) {
                 currentSummaryStatus = targetStatus;
                 const isMissing = targetStatus === 'not-submitted';
@@ -629,16 +674,28 @@
                 const badgeHoverClass = isMissing ? 'hover:bg-red-500 hover:text-white hover:border-red-600' : 'hover:bg-blue-500 hover:text-white hover:border-blue-600';
                 const btnColorClass = isMissing ? 'bg-rose-500 hover:bg-rose-600 shadow-rose-200' : 'bg-blue-500 hover:bg-blue-600 shadow-blue-200';
 
+                // --- 🛡️ 全域請假防護罩邏輯 ---
+                const currentAbsent = getGlobalAbsentSeats();
+                
+                if (currentAbsent.length > 0) {
+                    els.shieldIndicatorMissing.classList.remove('hidden');
+                    els.shieldIndicatorCorrection.classList.remove('hidden');
+                } else {
+                    els.shieldIndicatorMissing.classList.add('hidden');
+                    els.shieldIndicatorCorrection.classList.add('hidden');
+                }
+
                 els.summaryGrid.innerHTML = '';
                 els.summaryEmpty.classList.add('hidden');
                 els.summaryGrid.classList.remove('hidden');
 
                 let hasAnyRecords = false;
+                
+                // 抓出「現實中今天(含)以前」的所有日子
                 const todayObj = new Date();
                 const offset = todayObj.getTimezoneOffset() * 60000;
-                const localISOToday = (new Date(todayObj - offset)).toISOString().slice(0, 10);
-                
-                let sortedDates = Object.keys(allData).filter(dateStr => dateStr < localISOToday);
+                const realTodayStr = (new Date(todayObj - offset)).toISOString().slice(0, 10);
+                let sortedDates = Object.keys(allData).filter(dateStr => dateStr <= realTodayStr);
 
                 if (summaryViewMode === 'by-assignment') {
                     sortedDates.sort((a, b) => new Date(a) - new Date(b));
@@ -654,6 +711,9 @@
                         let dayAssignments = allData[date];
                         dayAssignments.forEach(assign => {
                             students.forEach(s => {
+                                // 🛡️ 防護罩攔截：如果他「今天」請假，完全不顯示他過去的紀錄
+                                if (currentAbsent.includes(s.seatNumber)) return; 
+
                                 let status = assign.records[s.seatNumber] || 'not-submitted';
                                 if (status === targetStatus) {
                                     if (!summaryData[s.seatNumber]) {
@@ -716,6 +776,9 @@
                             let missingStudents = [];
                             
                             students.forEach(s => {
+                                // 🛡️ 防護罩攔截
+                                if (currentAbsent.includes(s.seatNumber)) return;
+
                                 let status = assign.records[s.seatNumber] || 'not-submitted';
                                 if (status === targetStatus) {
                                     missingStudents.push(s);
@@ -824,11 +887,13 @@
 
             function renderGroupButtons() {
                 els.groupButtonsContainer.innerHTML = '';
+                const currentAbsent = getGlobalAbsentSeats();
+
                 studentGroups.forEach((group, index) => {
                     const btn = document.createElement('button');
                     const colors = ['bg-red-100 text-red-700', 'bg-orange-100 text-orange-700', 'bg-yellow-100 text-yellow-700', 'bg-green-100 text-green-700', 'bg-blue-100 text-blue-700', 'bg-purple-100 text-purple-700'];
                     const colorClass = colors[index % colors.length];
-                    btn.className = `${colorClass} w-full font-bold py-2 px-2 rounded-lg shadow-sm transition flex flex-col items-center justify-center hover:opacity-80`;
+                    btn.className = `${colorClass} w-full font-bold py-3 px-2 rounded-lg shadow-sm transition flex flex-col items-center justify-center hover:opacity-80`;
                     btn.innerHTML = `<span>${group.name}</span><span class="text-xs opacity-75 font-normal">一鍵繳交</span>`;
                     btn.onclick = () => {
                         const active = getActiveAssignment();
@@ -837,7 +902,10 @@
                         els.modalDesc.textContent = `成員: ${group.members.join(', ')}`;
                         pendingAction = () => {
                             group.members.forEach(seatNum => {
-                                if (students.find(s => s.seatNumber === seatNum)) active.records[seatNum] = 'submitted';
+                                // 🛡️ 小老師一鍵繳交時，自動忽略請假的同學
+                                if (students.find(s => s.seatNumber === seatNum) && !currentAbsent.includes(seatNum)) {
+                                    active.records[seatNum] = 'submitted';
+                                }
                             });
                             render();
                             saveData();
@@ -850,9 +918,20 @@
 
             function renderTabs() {
                 els.assignmentTabs.innerHTML = '';
+                const currentAbsent = getGlobalAbsentSeats();
+
                 assignments.forEach(assign => {
-                    const hasUnsubmitted = students.some(s => (assign.records[s.seatNumber] || 'not-submitted') === 'not-submitted');
-                    const hasToBeCorrected = students.some(s => assign.records[s.seatNumber] === 'to-be-corrected');
+                    // Check Unsubmitted (排除請假)
+                    const hasUnsubmitted = students.some(s => 
+                        !currentAbsent.includes(s.seatNumber) && 
+                        (assign.records[s.seatNumber] || 'not-submitted') === 'not-submitted'
+                    );
+                    // Check Corrected (排除請假)
+                    const hasToBeCorrected = students.some(s => 
+                        !currentAbsent.includes(s.seatNumber) && 
+                        assign.records[s.seatNumber] === 'to-be-corrected'
+                    );
+
                     const btn = document.createElement('button');
                     const isActive = assign.id === activeAssignmentId;
                     let classes = "tab-btn px-4 py-1.5 rounded-full border text-sm font-medium transition-colors duration-200 ";
@@ -879,13 +958,27 @@
                     els.studentGrid.innerHTML = '<div class="col-span-full text-center text-gray-400 py-10 font-bold bg-white rounded-xl border-2 border-dashed border-gray-200">本日無作業，請點擊上方綠色「＋」按鈕新增作業。</div>';
                     return;
                 }
+
+                const currentAbsent = getGlobalAbsentSeats();
+
                 students.forEach(student => {
+                    const isAbsent = currentAbsent.includes(student.seatNumber);
                     const currentStatus = active.records[student.seatNumber] || 'not-submitted';
                     const statusInfo = statusMap[currentStatus];
                     const div = document.createElement('div');
-                    div.className = `student-grid-item p-2 rounded-lg text-center cursor-pointer font-bold text-lg shadow select-none ${statusInfo.className}`;
-                    div.dataset.seat = student.seatNumber;
-                    div.innerHTML = `<div class="text-2xl pointer-events-none">${student.seatNumber}</div><div class="text-sm truncate px-1 pointer-events-none">${student.name || '　'}</div><div class="text-xs mt-1 border-t border-current border-opacity-20 pt-1 pointer-events-none">${statusInfo.text}</div>`;
+                    
+                    if (isAbsent) {
+                        // 🔒 請假狀態 (強制鎖定，因為他今天請假，不讓他被誤點)
+                        div.className = `student-grid-item p-2 rounded-lg text-center font-bold text-lg shadow select-none bg-gray-200 text-gray-400 opacity-60 cursor-not-allowed`;
+                        div.dataset.seat = student.seatNumber;
+                        div.innerHTML = `<div class="text-2xl pointer-events-none">${student.seatNumber}</div><div class="text-sm truncate px-1 pointer-events-none">${student.name || '　'}</div><div class="text-xs mt-1 border-t border-gray-300 pt-1 pointer-events-none">🔒 請假</div>`;
+                    } else {
+                        // 正常狀態
+                        div.className = `student-grid-item clickable p-2 rounded-lg text-center font-bold text-lg shadow select-none ${statusInfo.className}`;
+                        div.dataset.seat = student.seatNumber;
+                        div.innerHTML = `<div class="text-2xl pointer-events-none">${student.seatNumber}</div><div class="text-sm truncate px-1 pointer-events-none">${student.name || '　'}</div><div class="text-xs mt-1 border-t border-current border-opacity-20 pt-1 pointer-events-none">${statusInfo.text}</div>`;
+                    }
+                    
                     els.studentGrid.appendChild(div);
                 });
             }
@@ -900,8 +993,14 @@
                     els.toBeCorrectedList.textContent = '無';
                     return;
                 }
+                
                 let notSubmitted = [], toBeCorrected = [], submitted = [];
+                const currentAbsent = getGlobalAbsentSeats();
+
                 students.forEach(s => {
+                    // 🛡️ 統計時自動忽略「當天」請假的同學
+                    if (currentAbsent.includes(s.seatNumber)) return; 
+
                     const status = active.records[s.seatNumber] || 'not-submitted';
                     if (status === 'not-submitted') notSubmitted.push(s.seatNumber);
                     else if (status === 'to-be-corrected') toBeCorrected.push(s.seatNumber);
@@ -930,12 +1029,20 @@
                     cell.className = 'calendar-day hover:bg-gray-100 rounded-full cursor-pointer flex flex-col items-center justify-center';
                     cell.textContent = d;
                     if (dateStr === currentDate) cell.classList.add('active');
+                    
                     if (allData[dateStr] && allData[dateStr].length > 0) {
                         const dayAssignments = allData[dateStr];
+                        const currentAbsent = getGlobalAbsentSeats(); // 🛡️ 日曆紅藍點也依據「現實今天」的請假狀態
+
                         let hasUnsubmitted = false, hasToBeCorrected = false;
                         for (const assign of dayAssignments) {
-                            if (students.some(s => (assign.records[s.seatNumber] || 'not-submitted') === 'not-submitted')) { hasUnsubmitted = true; break; }
-                            if (students.some(s => assign.records[s.seatNumber] === 'to-be-corrected')) hasToBeCorrected = true;
+                            if (students.some(s => !currentAbsent.includes(s.seatNumber) && (assign.records[s.seatNumber] || 'not-submitted') === 'not-submitted')) { 
+                                hasUnsubmitted = true; 
+                                break; 
+                            }
+                            if (students.some(s => !currentAbsent.includes(s.seatNumber) && assign.records[s.seatNumber] === 'to-be-corrected')) {
+                                hasToBeCorrected = true;
+                            }
                         }
                         const dot = document.createElement('div');
                         dot.className = 'status-dot';
@@ -1024,6 +1131,11 @@
             els.studentGrid.addEventListener('click', (e) => {
                 const t = e.target.closest('.student-grid-item'); if(!t) return;
                 const seat = parseInt(t.dataset.seat);
+                
+                // 🛡️ 點擊時，如果該生「今天」請假，直接略過阻擋點擊
+                const currentAbsent = getGlobalAbsentSeats();
+                if (currentAbsent.includes(seat)) return; 
+
                 const active = getActiveAssignment();
                 if(!active) return;
                 const curr = active.records[seat] || 'not-submitted';
@@ -1067,8 +1179,17 @@
             els.markAllBtn.addEventListener('click', () => {
                 const active = getActiveAssignment();
                 if(!active) return alert("請先新增作業！");
-                els.modalTitle.textContent = '全部標記為繳交？'; els.modalDesc.textContent = '覆蓋當前作業狀態';
-                pendingAction = () => { students.forEach(s => active.records[s.seatNumber] = 'submitted'); render(); saveData(); };
+                els.modalTitle.textContent = '全部標記為繳交？'; els.modalDesc.textContent = '這會覆蓋「目前選定作業」的所有狀態。';
+                pendingAction = () => { 
+                    const currentAbsent = getGlobalAbsentSeats();
+                    students.forEach(s => {
+                        // 🛡️ 全班繳交時，自動跳過請假同學
+                        if (!currentAbsent.includes(s.seatNumber)) {
+                            active.records[s.seatNumber] = 'submitted'; 
+                        }
+                    });
+                    render(); saveData(); 
+                };
                 els.modal.classList.remove('hidden');
             });
             els.modalConfirm.addEventListener('click', () => { if(pendingAction) pendingAction(); els.modal.classList.add('hidden'); });
@@ -1080,11 +1201,19 @@
                     csv += "," + assignments.map(a => a.name).join(',');
                 }
                 csv += "\n";
+                
+                const currentAbsent = getGlobalAbsentSeats();
+
                 students.forEach(s => {
                     csv += `${s.seatNumber},${s.name}`;
                     assignments.forEach(a => {
-                        const statusKey = a.records[s.seatNumber] || 'not-submitted';
-                        csv += `,${statusMap[statusKey].text}`;
+                        // 如果該生請假，輸出的狀態強制顯示為「請假」
+                        if (currentAbsent.includes(s.seatNumber)) {
+                            csv += `,請假`;
+                        } else {
+                            const statusKey = a.records[s.seatNumber] || 'not-submitted';
+                            csv += `,${statusMap[statusKey].text}`;
+                        }
                     });
                     csv += "\n";
                 });
